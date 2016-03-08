@@ -580,7 +580,6 @@ bool f4_reduce( mht_poly_ref & new_gb , const poly_sto & all_polys, const f4_gb 
 		mono_t e = m / gb[r].head_term();
 
 		if( e.is_zero() ) {
-
 //			polys_in_g.insert( std::make_pair(m,gb.polys[r]) );
 			reductor_holder.push_back( gb[r] );
 			list_monos.add_poly(  gb[r].poly );
@@ -628,10 +627,6 @@ bool f4_reduce( mht_poly_ref & new_gb , const poly_sto & all_polys, const f4_gb 
 
 	total_reductee += new_gb.size();
 	total_reductor += reductor_holder.size();
-
-
-
-
 
 conversion_time -= get_ms_time();
 	//I actually don't need mat3 if I use m4ri
@@ -722,20 +717,6 @@ conversion_time -= get_ms_time();
 	}
 conversion_time += get_ms_time();
 cout<< "conversion 2 done" <<endl<<flush;
-
-/*
-	//as long as the ruducter is in the upper part, I get what I want;
-	for(unsigned i=0;i<mat3.size();i++) {
-		if( mat3[i]->is_zero() ) continue;
-		for(unsigned j=0;j<mat3.size();j++) {
-			if(i==j) continue;
-			if( mat3[j]->is_zero() ) continue;
-			if(! mat3[j]->get_coef(mat3[i]->head_term()).is_zero() ) {
-				*mat3[j] -= *mat3[i];
-			}
-		}
-	}
-*/
 
 
 	return true;
@@ -931,123 +912,6 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 	cout << "addpoly time: "<< addpoly_time <<"ms\n";
 	cout << "total time: "<< total_time <<"ms\n";
 }
-
-bool check_answer(ht_poly_ref& sorter){
-		if(sorter.size() != 28)
-			return false;
-		int count =0;
-		for(ht_poly_ref::iterator it=sorter.begin(); it!=sorter.end();it++){
-			if(check_rule(it->second, count) == false)
-				return false;
-			count++;
-		}
-		return true;
-}
-
-#define rule(a, b) {\
-			if(p->n_terms()-1 != b)	\
-				return false;	\
-			mono_t m = a;	\
-			if(p->head_term() != m)	\
-				return false;	\
-			}
-
-//I should go for a starndard answer input system if I'm to repeat
-bool check_rule(poly_t* p, int n){
-	switch(n){
-		case 0:
-			if(p->n_terms()!=0)
-				return false;
-		break;
-case 1 :
-    rule(X[8]*X[13], 5);
-    break; 
-case 2 :
-    rule(X[7]*X[13], 4);
-    break; 
-case 3 :
-    rule(X[8]*X[12], 8);
-    break; 
-case 4 :
-    rule(X[7]*X[12], 5);
-    break; 
-case 5 :
-    rule(X[10]*X[11], 8);
-    break; 
-case 6 :
-    rule(X[7]*X[11], 5);
-    break; 
-case 7 :
-    rule(X[6]*X[11], 6);
-    break; 
-case 8 :
-    rule(X[8]*X[10], 12);
-    break; 
-case 9 :
-    rule(X[7]*X[10], 7);
-    break; 
-case 10:
-    rule(X[8]*X[9], 10);
-    break; 
-case 11:
-    rule(X[7]*X[9], 2);
-    break; 
-case 12:
-    rule(X[7]*X[8], 6);
-    break; 
-case 13:
-    rule(X[7]*X[12]*X[13], 6);
-    break; 
-case 14:
-    rule(X[7]*X[11]*X[13], 11);
-    break; 
-case 15:
-    rule(X[7]*X[10]*X[13], 10);
-    break; 
-case 16:
-    rule(X[7]*X[9]*X[13], 12);
-    break; 
-case 17:
-    rule(X[7]*X[8]*X[13], 9);
-    break; 
-case 18:
-    rule(X[7]*X[11]*X[12], 12);
-    break; 
-case 19:
-    rule(X[7]*X[10]*X[12], 12);
-    break; 
-case 20:
-    rule(X[7]*X[9]*X[12], 10);
-    break; 
-case 21:
-    rule(X[7]*X[8]*X[12], 7);
-    break; 
-case 22:
-    rule(X[7]*X[10]*X[11], 10);
-    break; 
-case 23:
-    rule(X[7]*X[9]*X[11], 8);
-    break; 
-case 24:
-    rule(X[7]*X[8]*X[11], 8);
-    break; 
-case 25:
-    rule(X[7]*X[9]*X[10], 7);
-    break; 
-case 26:
-    rule(X[7]*X[8]*X[10], 8);
-    break; 
-case 27:
-    rule(X[7]*X[8]*X[9], 11);
-    break; 
-		default:
-			;
-	}
-
-	return true;
-
-}
-
 
 
 
