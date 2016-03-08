@@ -5,6 +5,7 @@ using namespace std;
 
 
 template struct n_mono_le_deg_table<N_VAR,MAX_DEG>;
+template struct min_mono_tab_init<N_VAR,MAX_DEG>;
 
 #include <algorithm>
 #include <m4ri/m4ri.h>
@@ -468,7 +469,7 @@ void gen_pair( worklist_t & wl , relation_t & rels , const f4_gb & gb , unsigned
 
 
 static
-bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb , worklist_t& wl, const relation_t & rels)
+bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb , const worklist_t& wl, const relation_t & rels)
 {
 
 	if(wl.empty()) return false;
@@ -477,11 +478,11 @@ bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb ,
 	int eliminated_field_pair_count = 0;
 	int eliminated_normal_pair_count = 0;
 	int mindeg = wl.begin()->first;//since this is a multimap, this is true
-	worklist_t::iterator it;
+	//worklist_t::iterator it;
+	worklist_t::const_iterator it;
 
 	for(it=wl.begin();it!=wl.end();it++) {
 		if(it->first > mindeg){
-			wl.erase(wl.begin(), it);
 			break;
 		}
 		poly_t p;
@@ -513,8 +514,7 @@ bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb ,
 		all_polys.push_back( p );
 		new_g.insert( make_pair(p.head_term(), &all_polys.back()) );
 	}
-	if(it == wl.end())
-		wl.clear();
+	/// wl.erase(wl.begin(), it);
 	
 	cout << new_g.size()<<" pairs chosen, degree: " << mindeg <<endl;
 	cout << total_field_pair_count << " field pairs, "<< eliminated_field_pair_count <<" eliminated." <<endl;
@@ -535,7 +535,40 @@ void guass_elim( poly_ref & g )
 }
 
 static
-bool f4_reduce( mht_poly_ref & new_gb , const poly_sto & all_polys, const f4_gb & gb )
+bool prepare_reductors(  map_mono_t & list_monos , ht_poly_ref & new_reductor , poly_sto & tmp_ext_poly
+	, const mono_t & min_mono , const f4_gb & gb )
+{
+	new_reductor.clear();
+	map_mono_t::iterator lit = list_monos.begin();
+	while( lit != list_monos.end() && *lit >= min_mono ) {
+		mono_t m = *lit;
+
+		find_divisor_time-=get_ms_time();
+		int r = gb.find_divisor( m );
+		find_divisor_time+=get_ms_time();
+		lit++;
+		if( 0 > r ) {
+			continue;
+		}
+
+		mono_t e = m / gb[r].head_term();
+		if( e.is_zero() ) {
+			new_reductor[m] = & gb[r];
+			list_monos.add_poly( gb[r].poly );
+		} else {
+			poly_t p = gb[r];
+			p *= e;
+			tmp_ext_poly.push_back( p );
+			new_reductor[m] = & tmp_ext_poly.back();
+			list_monos.add_poly( p.poly );
+		}
+	}
+	return new_reductor.size() > 0;
+
+}
+
+static
+bool f4_reduce( mht_poly_ref & new_gb , const mono_t & min_mono, const f4_gb & gb )
 {
 	if( 0 == new_gb.size() ) return false;
 
@@ -543,11 +576,9 @@ bool f4_reduce( mht_poly_ref & new_gb , const poly_sto & all_polys, const f4_gb 
 
 	mht_poly_ref::reverse_iterator nrit = new_gb.rbegin();
 
-	mono_t min_ht = gb.min_ht();
-	DUMP(std::cout << "min_ht: " << min_ht << "\n");
+	//mono_t min_ht = gb.min_ht();
+	DUMP(std::cout << "min_mono: " << min_mono << "\n");
 	DUMP(std::cout << "composing matrix...\n" );
-	
-	poly_sto reductor_holder;
 
 	map_mono_t list_monos;
 #ifdef __HAS_SIG__
@@ -563,89 +594,57 @@ bool f4_reduce( mht_poly_ref & new_gb , const poly_sto & all_polys, const f4_gb 
 
 	cout << "Number of pair polynomials: "<< new_gb.size()<<", at "<< list_monos.size()<<" column(s)"<< endl;
 
+	poly_sto reductor_holder;
+	ht_poly_ref ht_reductor;
 
-	map_mono_t::iterator lit = list_monos.begin();
-	unsigned idx = 0;
-	while( lit != list_monos.end() && *lit >= min_ht ) {
-		mono_t m = *lit;
-
-		find_divisor_time-=get_ms_time();
-		int r = gb.find_divisor( m );
-		find_divisor_time+=get_ms_time();
-		if( 0 > r ) {
-			lit++;
-			idx++;
-			continue;
-		}
-		mono_t e = m / gb[r].head_term();
-
-		if( e.is_zero() ) {
-//			polys_in_g.insert( std::make_pair(m,gb.polys[r]) );
-			reductor_holder.push_back( gb[r] );
-			list_monos.add_poly(  gb[r].poly );
-#ifdef __HAS_SIG__
-			ss = ( ss > gb[r].s )? ss : gb[r].s;
-#endif
-			lit++;
-			idx++;
-		} else {
-			poly_t p = gb[r];
-			p *= e;
-			reductor_holder.push_back( p );//don't really need to be stored after reduction
-//			polys_in_g.insert( std::make_pair( m,&reductor_holder.back()) );
-			list_monos.add_poly(  p.poly );
-#ifdef __HAS_SIG__
-			ss = ( ss > p.s )? ss : p.s;
-#endif
-			lit++;
-			idx++;
-		}
-	}
-
-	poly_t all_monos;
-#ifdef __HAS_SIG__
-	all_monos.s = ss;
-#endif
-	//list_monos.to_vpoly( all_monos.poly );
+	prepare_reductors( list_monos , ht_reductor , reductor_holder , min_mono , gb );
 
 	findreductor_time += get_ms_time();
 
 	int total_reductee_size = 0;
 	int total_reductor_size = 0;
 
-	for(int i=0; i< reductor_holder.size(); i++) {
-		total_reductor_size += reductor_holder[i].n_terms();
+//	for( int i=0; i< reductor_holder.size(); i++) {
+//		total_reductor_size += reductor_holder[i].n_terms();
+	for(ht_poly_ref::iterator it=ht_reductor.begin(); ht_reductor.end() != it; it++) {
+		total_reductor_size += it->second->n_terms();
 	}
 	for(mht_poly_ref::reverse_iterator it=new_gb.rbegin();it!=new_gb.rend();it++) {
 		total_reductee_size += it->second->n_terms();
 	}
 
 	cout << "Average length for reductees: "<< (double)total_reductee_size/ (double)new_gb.size();
-	cout << "["<< new_gb.size() <<"], reductors: "<< (double)total_reductor_size/ (double)reductor_holder.size();
-	cout << "["<< reductor_holder.size()<< "]"<<endl;
+	cout << "["<< new_gb.size() <<"], reductors: "<< (double)total_reductor_size/ (double)ht_reductor.size();
+	cout << "["<< ht_reductor.size()<< "]"<<endl;
 
 
 	total_reductee += new_gb.size();
-	total_reductor += reductor_holder.size();
+	total_reductor += ht_reductor.size();
+
+
+
+
 
 conversion_time -= get_ms_time();
 	//I actually don't need mat3 if I use m4ri
-	set<int> reductor_mono;
+	//set<int> reductor_mono;
 	map<mono_t, int> mono_to_int;
 	map<int, mono_t> int_to_mono;
 	int count = 0;
-	int nreduc = reductor_holder.size();
+	int nreduc = ht_reductor.size();
 	int nnew = new_gb.size();
-	
-	for(int i=0; i< reductor_holder.size(); i++){
-		int_to_mono[count] = reductor_holder[i].head_term();
-		mono_to_int[reductor_holder[i].head_term()] = count;
-		reductor_mono.insert(count);//I can also use a boundary the smaller ones are reductors
+
+	for(ht_poly_ref::reverse_iterator rit=ht_reductor.rbegin(); ht_reductor.rend() != rit; rit++) {
+		int_to_mono[count] = rit->second->head_term();
+		mono_to_int[rit->second->head_term()] = count;
+//	for(int i=0; i< reductor_holder.size(); i++){
+//		int_to_mono[count] = reductor_holder[i].head_term();
+//		mono_to_int[reductor_holder[i].head_term()] = count;
+//		reductor_mono.insert(count);//I can also use a boundary the smaller ones are reductors
 		count++;
 	}
 
-
-	lit = list_monos.begin();
+	map_mono_t::iterator lit = list_monos.begin();
 	while( lit != list_monos.end()){
 		if(mono_to_int.find(*lit) != mono_to_int.end()){
 			lit++;
@@ -668,11 +667,16 @@ conversion_time -= get_ms_time();
 	mzd_t* C = mzd_init(nnew , nreduc);
 	mzd_t* D = mzd_init(nnew , mono_to_int.size() - nreduc);
 
-	for(int i=0; i< nreduc; i++){
-		for(int j=0; j< reductor_holder[i].n_terms(); j++){
-			int ncolume = mono_to_int[reductor_holder[i].poly[j]];
+	unsigned i=0;
+	for(ht_poly_ref::reverse_iterator rit=ht_reductor.rbegin(); ht_reductor.rend() != rit; rit++) {
+//	for(int i=0; i< nreduc; i++){
+		poly_t & p = *(rit->second);
+//		poly_t & p = reductor_holder[i];
+		for(int j=0; j< p.n_terms(); j++){
+			int ncolume = mono_to_int[p.poly[j]];
 			mzd_write_bit(A, i, ncolume, 1);
 		}
+		i++;
 	}
 	count = 0;
 	for(mht_poly_ref::reverse_iterator it=new_gb.rbegin();it!=new_gb.rend();it++){
@@ -815,6 +819,7 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 
 	DUMP( std::cout << "[GenPair] " << wl.size() << " pairs.\n\n" );
 
+	poly_sto new_gb_sto;
 	mht_poly_ref new_gb;
 
 	int step_count = 0;
@@ -824,10 +829,13 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 
 		cout << "//////////////////////////// reduction step : "<< iteration_count << " //////////////////////////// "<< endl;
 		cout << "Basis length: "<<gb .size() <<", queue length: "<< wl.size() <<endl;
+		unsigned step_deg = wl.begin()->first;
+		cout << "Step degree: " << step_deg << "\n";
 
 		temp_counter = 0;
 		genspoly_time -= get_ms_time();
-		gen_spoly( new_gb , all_polys, gb , wl, rels);
+		new_gb_sto.clear();
+		gen_spoly( new_gb , new_gb_sto, gb , wl, rels);
 		genspoly_time += get_ms_time();
 		//DUMP(std::cout << "[SPOLY]: " << polys_in_g.size() << " org polys.\n" );
 		//dump_g(polys_in_g);
@@ -835,7 +843,8 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 		DUMP(std::cout << "[SPOLY]: " << temp_counter << " removed by syz check.\n");
 //	dump_g(new_gb);
 	
-		f4_reduce( new_gb , all_polys, gb);
+		mono_t min_mono = gb.min_ht();
+		f4_reduce( new_gb , min_mono, gb);
 
 		addpoly_time -= get_ms_time();
 		ht_poly_ref sorter;//ht should not duplicate except 0
@@ -854,14 +863,30 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 		/// So I added another container to simulate it
 
 		unsigned zero = 0;
+		unsigned add_deg = sorter.begin()->first.degree();
 		for(ht_poly_ref::iterator it=sorter.begin(); it!=sorter.end();it++){
 			if(it->second->is_zero() ) { zero++; reduced_to_zero++; continue; }
-			bool r = gb.add_poly(it->second);
+			if( add_deg != it->first.degree() ) break;
+			poly_t pp = *it->second;
+			all_polys.push_back(pp);
+			bool r = gb.add_poly( &all_polys.back() );
+			if( 1 >= pp.degree() ) {
+				DUMP( std::cout << pp << "\n" );
+			}
+			//bool r = gb.add_poly(it->second);
 			if( !r ) {
 				//ht_poly_ref::iterator ii = polys_in_g.find( it->second->head_term() );
 				//DUMP( std::cout << "in polys_in_g: " << !(polys_in_g.end()==ii) << "\n" );
 				
 			}
+		}
+		bool has_mutant = (add_deg < step_deg) && (0 != add_deg);
+		DUMP( std::cout << "has mutnat ?" << has_mutant << "\n" );
+		if( !has_mutant ) {
+			worklist_t::iterator it;
+			for(it=wl.begin();it!=wl.end();it++)
+				if(it->first > step_deg) break;
+			wl.erase(wl.begin(), it);
 		}
 		addpoly_time += get_ms_time();
 
@@ -912,6 +937,8 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 	cout << "addpoly time: "<< addpoly_time <<"ms\n";
 	cout << "total time: "<< total_time <<"ms\n";
 }
+
+
 
 
 

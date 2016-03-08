@@ -55,13 +55,24 @@ struct poly2_t
 	unsigned n_terms() const { return vv.size(); }
 	const mono_t & operator[](unsigned i) const { return vv[i]; }
 
-	const poly_t& operator = ( const poly_t& p ) { 
+	const poly_t& operator = ( const poly_t& p ) {
 		vv.resize(p.vv.size());
 		vv = p.vv;
 		return *this;
 	}
 
 /////////////////////////
+
+	void split( poly_t & ph , poly_t & pd , const mono_t & m ) const {
+		ph.clear();
+		pd.clear();
+		unsigned i=0;
+		for(;i<vv.size();i++) {
+			if( m < vv[i] ) break;
+			ph.vv.push_back(vv[i]);
+		}
+		for(;i<vv.size();i++) pd.vv.push_back(vv[i]);
+	}
 
 	bool is_mutiple_of(const mono_t & m) const {
 		for(unsigned i=0;i<vv.size();i++)

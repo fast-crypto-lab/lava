@@ -34,6 +34,53 @@ template <> struct n_mono_le_deg<0,1> { const static uint64_t v=1; };
 ///////////////////////////////////////////////////////////////////
 
 
+template <unsigned n_mono,unsigned deg>
+struct min_mono
+{
+	const static uint64_t v = min_mono<n_mono,deg-1>::v | (1ULL<<(n_mono-deg));
+};
+
+template <> struct min_mono<0,0> { const static uint64_t v=0; };
+template <unsigned n_mono> struct min_mono<n_mono,0> { const static uint64_t v=0; };
+
+
+template <unsigned n_mono, unsigned deg, unsigned I = deg>
+struct min_mono_tab_init { static const uint64_t dummy; };
+
+template <unsigned n_mono, unsigned deg>
+struct min_mono_tab_init<n_mono,deg,0>
+{
+	static const uint64_t dummy;
+	static uint64_t v[deg+1];
+};
+
+template <unsigned n_mono,unsigned deg>
+const uint64_t min_mono_tab_init<n_mono,deg,0>::dummy = 0;
+
+template <unsigned n_mono,unsigned deg>
+uint64_t min_mono_tab_init<n_mono,deg,0>::v[deg+1] = {0};
+
+template <unsigned n_mono,unsigned deg, unsigned I>
+const uint64_t min_mono_tab_init<n_mono,deg,I>::dummy
+		= min_mono_tab_init<n_mono,deg,0>::v[I] = min_mono<n_mono,I>::v + 0 * min_mono_tab_init<n_mono,deg,I-1>::dummy;
+
+
+/// initialize needed
+/// for ex:
+/// template struct min_mono_tab_init<10,9>;  /// explicit initialize
+
+template <unsigned n_mono,unsigned deg>
+struct min_mono_tab
+{
+	static const uint64_t *v;
+};
+
+template <unsigned n_mono,unsigned deg>
+const uint64_t * min_mono_tab<n_mono,deg>::v = & min_mono_tab_init<n_mono,deg,0>::v[0];
+
+////////////////////////////////////////
+
+
 template <unsigned n_mono , unsigned deg, unsigned I=(n_mono+1)*(deg+1)-1>
 struct n_mono_le_deg_table : public n_mono_le_deg_table<n_mono , deg , I-1> { static const uint64_t dummy; };
 
@@ -52,7 +99,6 @@ const uint64_t n_mono_le_deg_table<n_mono,deg,I>::dummy
 		= n_mono_le_deg_table<n_mono,deg,0>::v[I] = n_mono_le_deg<I%(deg+1),I/(deg+1)>::v
 							+ 0*n_mono_le_deg_table<n_mono,deg,I-1>::dummy;
 
-
 template <unsigned n_mono,unsigned deg>
 uint64_t n_mono_le_deg_table<n_mono,deg,0>::v[(n_mono+1)*(deg+1)] = {0};
 
@@ -60,7 +106,6 @@ uint64_t n_mono_le_deg_table<n_mono,deg,0>::v[(n_mono+1)*(deg+1)] = {0};
 /// initialize needed
 /// for ex:
 /// template struct n_mono_le_deg_table<10,12>;  /// explicit initialize
-
 
 
 template <unsigned deg, unsigned n_mono>
@@ -71,9 +116,6 @@ struct n_mono_table
 
 template <unsigned deg, unsigned n_mono>
 const uint64_t * n_mono_table<deg,n_mono>::v = & n_mono_le_deg_table<n_mono,deg>::v[n_mono*(deg+1)];
-
-
-
 
 
 ///////////////////////////////////////////////////////////////////////////////////
@@ -379,6 +421,7 @@ struct mono_var
 
 
 
+
 template <unsigned n_mono,unsigned max_deg>
 struct mono_2
 {
@@ -421,6 +464,11 @@ struct mono_2
 			d--;
 		}
 		return idx;
+	}
+
+	static const mono_2 & min_mono_of_deg(unsigned d) {
+		if( d > max_deg ) exit(-1);
+		return * (mono_2*) & min_mono_tab<n_mono,max_deg>::v[d];
 	}
 
 	uint64_t fast_idx() const { uint64_t d=degree(); return (d<<n_mono)-vv; } /// XXX: will fail if n_mono ~64
@@ -538,11 +586,17 @@ struct mono_2
 
 	friend std::ostream& operator << ( std::ostream& out, const mono_2& a){
 //		out << "[" << a.degree() << "|";
+		if( 0 == a.degree() ) { out << 1; return out; }
+		mono_2 tmp = a;
+		bool first = true;
 		for(unsigned i =0; i < n_mono; i++){
 #if 1
-			if( 0 == a.degree() ) { out << 1; break; }
-			if( is_nth_bit_on(a.vv,i) ) {
-				out << "X[" << i+1 << "]*";
+			if( is_nth_bit_on(tmp.vv,i) ) {
+				if( !first ) { out << "*"; }
+				else { first=false; }
+				out << "X[" << i+1 << "]";
+				flip_nth_bit(tmp.v,i);
+				if(0==tmp.degree()) break;
 			}
 #else
 			out << is_nth_bit_on(a.vv,i);

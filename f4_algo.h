@@ -116,9 +116,9 @@ struct Src_poly_t
 	int get_position(const mono_t & m) const { return poly.get_position(m); }
 	gf_t get_coef(const mono_t & m) const { return poly.get_coef(m); }
 
-	bool CanGenFieldSpoly(mono_t & m) const {return !poly.is_mutiple_of(m);}
+	bool CanGenFieldSpoly( const mono_t & m) const {return !poly.is_mutiple_of(m);}
 
-	Src_poly_t GenFieldSpoly(mono_t & m) const{ 
+	Src_poly_t GenFieldSpoly( const mono_t & m) const{ 
 		Src_poly_t p; 
 #ifdef __HAS_SIG__
 		p.s = s*m;//not necessary in f4
