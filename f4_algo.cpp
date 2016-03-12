@@ -9,6 +9,7 @@ template struct min_mono_tab_init<N_VAR,MAX_DEG>;
 
 #include <algorithm>
 #include <m4ri/m4ri.h>
+#include <unordered_map>
 
 static int total_pair = 0;
 static int total_elim_size = 0;
@@ -38,6 +39,20 @@ mono_t X[N_VAR+1];
 extern int selector[8];
 extern int selector_count;
 
+ 
+struct MonomialHash {
+ std::size_t operator()(const mono_t& k) const
+ {
+     return k.vv;
+ }
+};
+ 
+struct MonomialEqual {
+ bool operator()(const mono_t& lhs, const mono_t& rhs) const
+ {
+    return lhs == rhs;
+ }
+};
 
 struct pair_t
 {
@@ -535,35 +550,44 @@ void guass_elim( poly_ref & g )
 }
 
 static
-bool prepare_reductors(  map_mono_t & list_monos , ht_poly_ref & new_reductor , poly_sto & tmp_ext_poly
+bool prepare_reductors(  map_mono_t & list_monos ,poly_ref& selected_reductor,  unordered_map<mono_t, poly_t*, MonomialHash, MonomialEqual> & reductor_finder , poly_sto & reductor_storage
 	, const mono_t & min_mono , const f4_gb & gb )
 {
-	new_reductor.clear();
+
 	map_mono_t::iterator lit = list_monos.begin();
-	while( lit != list_monos.end() && *lit >= min_mono ) {
+	while( lit != list_monos.end() ) {
 		mono_t m = *lit;
+		lit++;
+		if(reductor_finder.find(m) != reductor_finder.end()){
+			selected_reductor.push_back(reductor_finder[m]);
+			list_monos.add_poly(reductor_finder[m]->poly);
+			continue;
+		}
 
 		find_divisor_time-=get_ms_time();
 		int r = gb.find_divisor( m );
 		find_divisor_time+=get_ms_time();
-		lit++;
 		if( 0 > r ) {
 			continue;
 		}
 
 		mono_t e = m / gb[r].head_term();
 		if( e.is_zero() ) {
-			new_reductor[m] = & gb[r];
-			list_monos.add_poly( gb[r].poly );
+			//I choose not to add a copy into reductor storage.
+			//The reason is I'd like to update some gb in reduction, since it doesn't change ht, nothing should go wrong.
+			//I hope so.
+			selected_reductor.push_back( &gb[r] );
+			list_monos.add_poly(  gb[r].poly );
 		} else {
 			poly_t p = gb[r];
 			p *= e;
-			tmp_ext_poly.push_back( p );
-			new_reductor[m] = & tmp_ext_poly.back();
-			list_monos.add_poly( p.poly );
+			reductor_storage.push_back( p );
+			reductor_finder[m] = &reductor_storage.back();
+			selected_reductor.push_back( &reductor_storage.back() );
+			list_monos.add_poly(  p.poly );
 		}
 	}
-	return new_reductor.size() > 0;
+	return selected_reductor.size() > 0;
 
 }
 
@@ -581,68 +605,54 @@ bool f4_reduce( mht_poly_ref & new_gb , const mono_t & min_mono, const f4_gb & g
 	DUMP(std::cout << "composing matrix...\n" );
 
 	map_mono_t list_monos;
-#ifdef __HAS_SIG__
-	Src ss = nrit->second->s;
-#endif
 	for(;nrit!=new_gb.rend();nrit++) { 
 		list_monos.add_poly( (*nrit->second).poly); 
-#ifdef __HAS_SIG__
-		ss = ( ss>nrit->second->s)? ss: nrit->second->s;
-#endif
 	}
-	//for(;prit!=polys_in_g.rend();prit++) { list_monos |= (*prit->second).poly; ss = ( ss>prit->second->s)? ss : prit->second->s; }
 
 	cout << "Number of pair polynomials: "<< new_gb.size()<<", at "<< list_monos.size()<<" column(s)"<< endl;
 
-	poly_sto reductor_holder;
-	ht_poly_ref ht_reductor;
+	static poly_sto reductor_storage;
+	static unordered_map<mono_t, poly_t*, MonomialHash, MonomialEqual> reductor_finder;
+	poly_ref selected_reductor;
 
-	prepare_reductors( list_monos , ht_reductor , reductor_holder , min_mono , gb );
+	prepare_reductors( list_monos , selected_reductor, reductor_finder , reductor_storage , min_mono , gb );
+
+	cout << "All monos including reductor: "<< list_monos.size()<< endl;
 
 	findreductor_time += get_ms_time();
 
 	int total_reductee_size = 0;
 	int total_reductor_size = 0;
 
-//	for( int i=0; i< reductor_holder.size(); i++) {
-//		total_reductor_size += reductor_holder[i].n_terms();
-	for(ht_poly_ref::iterator it=ht_reductor.begin(); ht_reductor.end() != it; it++) {
-		total_reductor_size += it->second->n_terms();
+	for( int i=0; i< selected_reductor.size(); i++) {
+		total_reductor_size += selected_reductor[i]->n_terms();
 	}
 	for(mht_poly_ref::reverse_iterator it=new_gb.rbegin();it!=new_gb.rend();it++) {
 		total_reductee_size += it->second->n_terms();
 	}
 
 	cout << "Average length for reductees: "<< (double)total_reductee_size/ (double)new_gb.size();
-	cout << "["<< new_gb.size() <<"], reductors: "<< (double)total_reductor_size/ (double)ht_reductor.size();
-	cout << "["<< ht_reductor.size()<< "]"<<endl;
-
+	cout << "["<< new_gb.size() <<"], reductors: "<< (double)total_reductor_size/ (double)selected_reductor.size();
+	cout << "["<< selected_reductor.size()<< "]"<<endl;
 
 	total_reductee += new_gb.size();
-	total_reductor += ht_reductor.size();
-
-
+	total_reductor += selected_reductor.size();
 
 
 
 conversion_time -= get_ms_time();
-	//I actually don't need mat3 if I use m4ri
-	//set<int> reductor_mono;
-	map<mono_t, int> mono_to_int;
-	map<int, mono_t> int_to_mono;
+	unordered_map<mono_t, int, MonomialHash, MonomialEqual> mono_to_int;
+	unordered_map<int, mono_t> int_to_mono;
 	int count = 0;
-	int nreduc = ht_reductor.size();
+	int nreduc = selected_reductor.size();
 	int nnew = new_gb.size();
-
-	for(ht_poly_ref::reverse_iterator rit=ht_reductor.rbegin(); ht_reductor.rend() != rit; rit++) {
-		int_to_mono[count] = rit->second->head_term();
-		mono_to_int[rit->second->head_term()] = count;
-//	for(int i=0; i< reductor_holder.size(); i++){
-//		int_to_mono[count] = reductor_holder[i].head_term();
-//		mono_to_int[reductor_holder[i].head_term()] = count;
-//		reductor_mono.insert(count);//I can also use a boundary the smaller ones are reductors
+	
+	for(int i=0; i< selected_reductor.size() ; i++){
+		int_to_mono[count] = selected_reductor[i]->head_term();
+		mono_to_int[selected_reductor[i]->head_term()] = count;
 		count++;
 	}
+
 
 	map_mono_t::iterator lit = list_monos.begin();
 	while( lit != list_monos.end()){
@@ -656,39 +666,39 @@ conversion_time -= get_ms_time();
 		lit++;
 	}
 	cout << "total #mono : " << mono_to_int.size() <<endl;
+
 	if(mono_to_int.size() == nreduc){
 		for(mht_poly_ref::reverse_iterator it=new_gb.rbegin(); it != new_gb.rend(); it++)
 			it->second->set_zero();
 		conversion_time += get_ms_time();
 		return true;
 	}	
+
+
 	mzd_t* A = mzd_init(nreduc, mono_to_int.size());
 	mzd_t* B = mzd_init(nreduc, mono_to_int.size() - nreduc);
-	mzd_t* C = mzd_init(nnew , nreduc);
 	mzd_t* D = mzd_init(nnew , mono_to_int.size() - nreduc);
-
-	unsigned i=0;
-	for(ht_poly_ref::reverse_iterator rit=ht_reductor.rbegin(); ht_reductor.rend() != rit; rit++) {
-//	for(int i=0; i< nreduc; i++){
-		poly_t & p = *(rit->second);
-//		poly_t & p = reductor_holder[i];
-		for(int j=0; j< p.n_terms(); j++){
-			int ncolume = mono_to_int[p.poly[j]];
-			mzd_write_bit(A, i, ncolume, 1);
+	vector<vector<int> > C_sparse;
+	for(int i=0; i< nreduc; i++){
+		for(int j=0; j< selected_reductor[i]->n_terms(); j++){
+			int ncolumn = mono_to_int[selected_reductor[i]->poly[j]];
+			mzd_write_bit(A, i, ncolumn, 1);
 		}
-		i++;
 	}
+
 	count = 0;
-	for(mht_poly_ref::reverse_iterator it=new_gb.rbegin();it!=new_gb.rend();it++){
+	for(mht_poly_ref::iterator it=new_gb.begin();it!=new_gb.end();it++){
+		C_sparse.push_back(vector<int>());
 		for(int j=0; j< it->second->n_terms(); j++){
-			int ncolume = mono_to_int[it->second->poly[j]];
-			if(ncolume < nreduc)
-				mzd_write_bit(C, count, ncolume, 1);
+			int ncolumn = mono_to_int[it->second->poly[j]];
+			if(ncolumn < nreduc)
+				C_sparse[count].push_back(ncolumn);
 			else
-				mzd_write_bit(D, count, ncolume-nreduc, 1);
+				mzd_write_bit(D, count, ncolumn-nreduc, 1);
 		}
 		count++;
 	}
+
 
 
 conversion_time += get_ms_time();
@@ -697,16 +707,20 @@ computation_time -= get_ms_time();
 	if(nreduc != 0){
 		mzd_top_echelonize_m4ri(A, 0);
 		mzd_submatrix(B, A, 0, nreduc, nreduc, mono_to_int.size());
-		mzd_addmul_naive(D, C, B);
+//sparse mul, used only once so not fuctionized
+		for(int i=0; i< nnew; i++){
+			for(int j=0; j< C_sparse[i].size(); j++){
+				mzd_combine_even_in_place(D, i, 0, B, C_sparse[i][j], 0);
+			}
+		}
 	}
 	mzd_echelonize_m4ri(D, 1, 0);// parameter to be determined
 computation_time += get_ms_time();
 cout<< "computation done" <<endl<<flush;
 conversion_time -= get_ms_time();
 
-	mht_poly_ref::reverse_iterator it=new_gb.rbegin();
 	count = 0;
-	for(mht_poly_ref::reverse_iterator it=new_gb.rbegin(); it != new_gb.rend(); it++){
+	for(mht_poly_ref::iterator it=new_gb.begin(); it != new_gb.end(); it++){
 		it->second->set_zero();
 		for(int j=0; j< (mono_to_int.size() - nreduc +63)/64; j++){
 			uint64_t s = D->rows[count][j];
@@ -719,6 +733,26 @@ conversion_time -= get_ms_time();
 		}
 		count++;
 	}
+
+
+	for(int i = 0; i< selected_reductor.size(); i++){
+		mono_t head = selected_reductor[i] -> head_term();
+		selected_reductor[i]->poly.vv.clear();//alright, brute force here
+		selected_reductor[i]->poly.vv.push_back(head);
+		for(int j=0; j< (mono_to_int.size()- nreduc + 63)/64; j++){
+			uint64_t s = B->rows[i][j];
+			if(s == 0) continue;
+			for(int k = 0; k < 64; k++){
+				if(1&(s>>k)){
+					selected_reductor[i]->poly.vv.push_back(int_to_mono[j*64+k+nreduc]);
+				}
+			}
+		}
+	}
+
+
+
+
 conversion_time += get_ms_time();
 cout<< "conversion 2 done" <<endl<<flush;
 

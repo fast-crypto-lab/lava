@@ -6,7 +6,7 @@ YACC=  bison -d
 LD=    g++
 
 CFLAGS=  -O3 -std=gnu99 -msse2 -mpopcnt  -Werror
-CXXFLAGS= -O3 -msse2 -mssse3 -mpopcnt   -pthread -fopenmp
+CXXFLAGS= -O3 -msse2 -mssse3 -mpopcnt   -pthread -fopenmp -std=c++0x
 INCPATH= -I/usr/local/include -I/opt/local/include -I/usr/include
 LDFLAGS=  
 LIBPATH= -L/usr/local/lib -L/opt/local/lib -L/usr/lib 
