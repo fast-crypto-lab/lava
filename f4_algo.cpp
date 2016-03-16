@@ -674,15 +674,18 @@ conversion_time -= get_ms_time();
 		return true;
 	}	
 
-
-	mzd_t* A = mzd_init(nreduc, mono_to_int.size());
 	mzd_t* B = mzd_init(nreduc, mono_to_int.size() - nreduc);
 	mzd_t* D = mzd_init(nnew , mono_to_int.size() - nreduc);
+	vector<vector<int> > A_sparse;
 	vector<vector<int> > C_sparse;
 	for(int i=0; i< nreduc; i++){
+		A_sparse.push_back(vector<int>());
 		for(int j=0; j< selected_reductor[i]->n_terms(); j++){
 			int ncolumn = mono_to_int[selected_reductor[i]->poly[j]];
-			mzd_write_bit(A, i, ncolumn, 1);
+			if(ncolumn < nreduc)
+				A_sparse[i].push_back(ncolumn);
+			else
+				mzd_write_bit(B, i, ncolumn-nreduc, 1);
 		}
 	}
 
@@ -705,8 +708,15 @@ conversion_time += get_ms_time();
 cout<< "conversion 1 done" <<endl<<flush;
 computation_time -= get_ms_time();
 	if(nreduc != 0){
-		mzd_top_echelonize_m4ri(A, 0);
-		mzd_submatrix(B, A, 0, nreduc, nreduc, mono_to_int.size());
+//this is not a parallelizable code, so I don't like this, maybe m4ri is a better idea
+	for(int i=nreduc-1; i>=0; i--){
+		for(int j=1; j< A_sparse[i].size(); j++){
+			mzd_combine_even_in_place(B, i, 0, B, A_sparse[i][j], 0);
+		}
+	}
+
+//		mzd_top_echelonize_m4ri(A, 0);
+//		mzd_submatrix(B, A, 0, nreduc, nreduc, mono_to_int.size());
 //sparse mul, used only once so not fuctionized
 		for(int i=0; i< nnew; i++){
 			for(int j=0; j< C_sparse[i].size(); j++){
