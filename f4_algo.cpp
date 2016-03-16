@@ -5,7 +5,6 @@ using namespace std;
 
 
 template struct n_mono_le_deg_table<N_VAR,MAX_DEG>;
-template struct min_mono_tab_init<N_VAR,MAX_DEG>;
 
 #include <algorithm>
 #include <m4ri/m4ri.h>
@@ -39,6 +38,7 @@ mono_t X[N_VAR+1];
 extern int selector[8];
 extern int selector_count;
 
+
  
 struct MonomialHash {
  std::size_t operator()(const mono_t& k) const
@@ -53,6 +53,7 @@ struct MonomialEqual {
     return lhs == rhs;
  }
 };
+
 
 struct pair_t
 {
@@ -484,7 +485,7 @@ void gen_pair( worklist_t & wl , relation_t & rels , const f4_gb & gb , unsigned
 
 
 static
-bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb , const worklist_t& wl, const relation_t & rels)
+bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb , worklist_t& wl, const relation_t & rels)
 {
 
 	if(wl.empty()) return false;
@@ -493,11 +494,11 @@ bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb ,
 	int eliminated_field_pair_count = 0;
 	int eliminated_normal_pair_count = 0;
 	int mindeg = wl.begin()->first;//since this is a multimap, this is true
-	//worklist_t::iterator it;
-	worklist_t::const_iterator it;
+	worklist_t::iterator it;
 
 	for(it=wl.begin();it!=wl.end();it++) {
 		if(it->first > mindeg){
+			wl.erase(wl.begin(), it);
 			break;
 		}
 		poly_t p;
@@ -529,7 +530,8 @@ bool gen_spoly( mht_poly_ref & new_g , poly_sto & all_polys , const f4_gb & gb ,
 		all_polys.push_back( p );
 		new_g.insert( make_pair(p.head_term(), &all_polys.back()) );
 	}
-	/// wl.erase(wl.begin(), it);
+	if(it == wl.end())
+		wl.clear();
 	
 	cout << new_g.size()<<" pairs chosen, degree: " << mindeg <<endl;
 	cout << total_field_pair_count << " field pairs, "<< eliminated_field_pair_count <<" eliminated." <<endl;
@@ -550,49 +552,7 @@ void guass_elim( poly_ref & g )
 }
 
 static
-bool prepare_reductors(  map_mono_t & list_monos ,poly_ref& selected_reductor,  unordered_map<mono_t, poly_t*, MonomialHash, MonomialEqual> & reductor_finder , poly_sto & reductor_storage
-	, const mono_t & min_mono , const f4_gb & gb )
-{
-
-	map_mono_t::iterator lit = list_monos.begin();
-	while( lit != list_monos.end() ) {
-		mono_t m = *lit;
-		lit++;
-		if(reductor_finder.find(m) != reductor_finder.end()){
-			selected_reductor.push_back(reductor_finder[m]);
-			list_monos.add_poly(reductor_finder[m]->poly);
-			continue;
-		}
-
-		find_divisor_time-=get_ms_time();
-		int r = gb.find_divisor( m );
-		find_divisor_time+=get_ms_time();
-		if( 0 > r ) {
-			continue;
-		}
-
-		mono_t e = m / gb[r].head_term();
-		if( e.is_zero() ) {
-			//I choose not to add a copy into reductor storage.
-			//The reason is I'd like to update some gb in reduction, since it doesn't change ht, nothing should go wrong.
-			//I hope so.
-			selected_reductor.push_back( &gb[r] );
-			list_monos.add_poly(  gb[r].poly );
-		} else {
-			poly_t p = gb[r];
-			p *= e;
-			reductor_storage.push_back( p );
-			reductor_finder[m] = &reductor_storage.back();
-			selected_reductor.push_back( &reductor_storage.back() );
-			list_monos.add_poly(  p.poly );
-		}
-	}
-	return selected_reductor.size() > 0;
-
-}
-
-static
-bool f4_reduce( mht_poly_ref & new_gb , const mono_t & min_mono, const f4_gb & gb )
+bool f4_reduce( mht_poly_ref & new_gb , const poly_sto & all_polys, const f4_gb & gb )
 {
 	if( 0 == new_gb.size() ) return false;
 
@@ -600,9 +560,13 @@ bool f4_reduce( mht_poly_ref & new_gb , const mono_t & min_mono, const f4_gb & g
 
 	mht_poly_ref::reverse_iterator nrit = new_gb.rbegin();
 
-	//mono_t min_ht = gb.min_ht();
-	DUMP(std::cout << "min_mono: " << min_mono << "\n");
+	mono_t min_ht = gb.min_ht();
+	DUMP(std::cout << "min_ht: " << min_ht << "\n");
 	DUMP(std::cout << "composing matrix...\n" );
+	
+	static poly_sto reductor_storage;
+	static map<mono_t, poly_t*> reductor_finder;
+	poly_ref selected_reductor;
 
 	map_mono_t list_monos;
 	for(;nrit!=new_gb.rend();nrit++) { 
@@ -611,23 +575,58 @@ bool f4_reduce( mht_poly_ref & new_gb , const mono_t & min_mono, const f4_gb & g
 
 	cout << "Number of pair polynomials: "<< new_gb.size()<<", at "<< list_monos.size()<<" column(s)"<< endl;
 
-	static poly_sto reductor_storage;
-	static unordered_map<mono_t, poly_t*, MonomialHash, MonomialEqual> reductor_finder;
-	poly_ref selected_reductor;
 
-	prepare_reductors( list_monos , selected_reductor, reductor_finder , reductor_storage , min_mono , gb );
+	map_mono_t::iterator lit = list_monos.begin();
+	while( lit != list_monos.end() && *lit >= min_ht ) {
+		mono_t m = *lit;
+		//find from existing reductor first
+		if(reductor_finder.find(m) != reductor_finder.end()){
+			selected_reductor.push_back(reductor_finder[m]);
+			list_monos.add_poly(reductor_finder[m]->poly);
+			lit++;
+			continue;
+		}
+
+		find_divisor_time-=get_ms_time();
+		int r = gb.find_divisor( m );
+		find_divisor_time+=get_ms_time();
+		if( 0 > r ) {
+			lit++;
+			continue;
+		}
+		mono_t e = m / gb[r].head_term();
+
+		if( e.is_zero() ) {
+			//I choose not to add a copy into reductor storage.
+			//The reason is I'd like to update some gb in reduction, since it doesn't change ht, nothing should go wrong.
+			//I hope so.
+			selected_reductor.push_back( &gb[r] );
+			list_monos.add_poly(  gb[r].poly );
+			lit++;
+		} else {
+			poly_t p = gb[r];
+			p *= e;
+			reductor_storage.push_back( p );
+			reductor_finder[m] = &reductor_storage.back();
+			selected_reductor.push_back( &reductor_storage.back() );
+			list_monos.add_poly(  p.poly );
+			lit++;
+		}
+	}
 
 	cout << "All monos including reductor: "<< list_monos.size()<< endl;
+
+	poly_t all_monos;
 
 	findreductor_time += get_ms_time();
 
 	int total_reductee_size = 0;
 	int total_reductor_size = 0;
 
-	for( int i=0; i< selected_reductor.size(); i++) {
+	for(int i=0; i< selected_reductor.size(); i++) {
 		total_reductor_size += selected_reductor[i]->n_terms();
 	}
-	for(mht_poly_ref::reverse_iterator it=new_gb.rbegin();it!=new_gb.rend();it++) {
+	for(mht_poly_ref::iterator it=new_gb.begin();it!=new_gb.end();it++) {
 		total_reductee_size += it->second->n_terms();
 	}
 
@@ -635,12 +634,12 @@ bool f4_reduce( mht_poly_ref & new_gb , const mono_t & min_mono, const f4_gb & g
 	cout << "["<< new_gb.size() <<"], reductors: "<< (double)total_reductor_size/ (double)selected_reductor.size();
 	cout << "["<< selected_reductor.size()<< "]"<<endl;
 
+
 	total_reductee += new_gb.size();
 	total_reductor += selected_reductor.size();
 
-
-
 conversion_time -= get_ms_time();
+
 	unordered_map<mono_t, int, MonomialHash, MonomialEqual> mono_to_int;
 	unordered_map<int, mono_t> int_to_mono;
 	int count = 0;
@@ -654,7 +653,7 @@ conversion_time -= get_ms_time();
 	}
 
 
-	map_mono_t::iterator lit = list_monos.begin();
+	lit = list_monos.begin();
 	while( lit != list_monos.end()){
 		if(mono_to_int.find(*lit) != mono_to_int.end()){
 			lit++;
@@ -674,6 +673,8 @@ conversion_time -= get_ms_time();
 		return true;
 	}	
 
+
+//	mzd_t* A = mzd_init(nreduc, mono_to_int.size());
 	mzd_t* B = mzd_init(nreduc, mono_to_int.size() - nreduc);
 	mzd_t* D = mzd_init(nnew , mono_to_int.size() - nreduc);
 	vector<vector<int> > A_sparse;
@@ -725,6 +726,7 @@ computation_time -= get_ms_time();
 		}
 	}
 	mzd_echelonize_m4ri(D, 1, 0);// parameter to be determined
+
 computation_time += get_ms_time();
 cout<< "computation done" <<endl<<flush;
 conversion_time -= get_ms_time();
@@ -755,12 +757,11 @@ conversion_time -= get_ms_time();
 			for(int k = 0; k < 64; k++){
 				if(1&(s>>k)){
 					selected_reductor[i]->poly.vv.push_back(int_to_mono[j*64+k+nreduc]);
+
 				}
 			}
 		}
 	}
-
-
 
 
 conversion_time += get_ms_time();
@@ -863,7 +864,6 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 
 	DUMP( std::cout << "[GenPair] " << wl.size() << " pairs.\n\n" );
 
-	poly_sto new_gb_sto;
 	mht_poly_ref new_gb;
 
 	int step_count = 0;
@@ -873,13 +873,10 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 
 		cout << "//////////////////////////// reduction step : "<< iteration_count << " //////////////////////////// "<< endl;
 		cout << "Basis length: "<<gb .size() <<", queue length: "<< wl.size() <<endl;
-		unsigned step_deg = wl.begin()->first;
-		cout << "Step degree: " << step_deg << "\n";
 
 		temp_counter = 0;
 		genspoly_time -= get_ms_time();
-		new_gb_sto.clear();
-		gen_spoly( new_gb , new_gb_sto, gb , wl, rels);
+		gen_spoly( new_gb , all_polys, gb , wl, rels);
 		genspoly_time += get_ms_time();
 		//DUMP(std::cout << "[SPOLY]: " << polys_in_g.size() << " org polys.\n" );
 		//dump_g(polys_in_g);
@@ -887,8 +884,7 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 		DUMP(std::cout << "[SPOLY]: " << temp_counter << " removed by syz check.\n");
 //	dump_g(new_gb);
 	
-		mono_t min_mono = gb.min_ht();
-		f4_reduce( new_gb , min_mono, gb);
+		f4_reduce( new_gb , all_polys, gb);
 
 		addpoly_time -= get_ms_time();
 		ht_poly_ref sorter;//ht should not duplicate except 0
@@ -907,30 +903,14 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 		/// So I added another container to simulate it
 
 		unsigned zero = 0;
-		unsigned add_deg = sorter.begin()->first.degree();
 		for(ht_poly_ref::iterator it=sorter.begin(); it!=sorter.end();it++){
 			if(it->second->is_zero() ) { zero++; reduced_to_zero++; continue; }
-			if( add_deg != it->first.degree() ) break;
-			poly_t pp = *it->second;
-			all_polys.push_back(pp);
-			bool r = gb.add_poly( &all_polys.back() );
-			if( 1 >= pp.degree() ) {
-				DUMP( std::cout << pp << "\n" );
-			}
-			//bool r = gb.add_poly(it->second);
+			bool r = gb.add_poly(it->second);
 			if( !r ) {
 				//ht_poly_ref::iterator ii = polys_in_g.find( it->second->head_term() );
 				//DUMP( std::cout << "in polys_in_g: " << !(polys_in_g.end()==ii) << "\n" );
 				
 			}
-		}
-		bool has_mutant = (add_deg < step_deg) && (0 != add_deg);
-		DUMP( std::cout << "has mutnat ?" << has_mutant << "\n" );
-		if( !has_mutant ) {
-			worklist_t::iterator it;
-			for(it=wl.begin();it!=wl.end();it++)
-				if(it->first > step_deg) break;
-			wl.erase(wl.begin(), it);
 		}
 		addpoly_time += get_ms_time();
 
@@ -981,7 +961,6 @@ void F4_algo( std::deque<base_poly_t> & out , std::deque<base_poly_t> & inp )
 	cout << "addpoly time: "<< addpoly_time <<"ms\n";
 	cout << "total time: "<< total_time <<"ms\n";
 }
-
 
 
 
