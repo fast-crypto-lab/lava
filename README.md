@@ -11,3 +11,9 @@ To make, m4ri library is required, please moldify the makefile if you installed 
 
 Mutant strategy branch:
 This branch uses a mutant-first strategy, and results in a speed faster than magma.
+
+Static reductor branch:
+Thanks to Mark Stevens, this branch keeps all generated and reduced reductor, results in a significant speed up.
+
+Mutant static reductor branch:
+The combination of above two method.
